@@ -5,13 +5,13 @@ metadata:
   namespace: default
   labels:
     app: api
-    release: monitoring  # Important: doit matcher le label du prometheus-operator
+    release: monitoring
 spec:
   selector:
     matchLabels:
-      app: api  # Match le service api-service
+      app: api
   endpoints:
-  - port: http  # Utilise le nom de port du Service
+  - port: http
     path: /metrics
     interval: 30s
     scrapeTimeout: 10s

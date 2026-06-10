@@ -1,5 +1,3 @@
----
-# Persistent Volume utilisant le dossier local dags/
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -12,10 +10,9 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: hostpath
   hostPath:
-    path: "/Users/krst/Documents/Albert_school/Automation & Deployment/theprojectthathelpsyoubetterunderstndhowyourdataisusedineverycompanystermsandconditionsbecausenooneverreadsthem/dags"
+    path: "/path/to/your/project/dags"   # Update to your local dags/ folder path
     type: Directory
 ---
-# Persistent Volume Claim pour Airflow
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

@@ -1,18 +1,14 @@
----
-# ServiceAccount pour les pods Airflow qui lancent des workers
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: airflow-worker-launcher
   namespace: airflow
-
 ---
-# Role avec les permissions nécessaires pour créer/gérer des pods
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: airflow-pod-launcher-role
-  namespace: airflow
+  namespace: default
 rules:
   - apiGroups: [""]
     resources: ["pods"]
@@ -26,19 +22,16 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["list"]
-
 ---
-# RoleBinding pour lier le ServiceAccount au Role
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
   name: airflow-pod-launcher-binding
-  namespace: airflow
 subjects:
   - kind: ServiceAccount
     name: airflow-worker-launcher
     namespace: airflow
 roleRef:
-  kind: Role
-  name: airflow-pod-launcher-role
+  kind: ClusterRole
+  name: cluster-admin
   apiGroup: rbac.authorization.k8s.io

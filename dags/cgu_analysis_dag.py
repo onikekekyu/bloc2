@@ -1,122 +1,154 @@
 """
-DAG Airflow pour l'analyse de Terms & Conditions - VERSION SIMPLIFIÉE
-Ce DAG utilise uniquement des BashOperators pour garantir le succès.
+DAG Airflow - Pipeline d'analyse de Terms & Conditions
+2Long2Read : Claude AI → MongoDB → Prometheus → Grafana
 """
 import pendulum
+from datetime import timedelta
 from airflow.models.dag import DAG
-from airflow.operators.bash import BashOperator
+from airflow.operators.python import PythonOperator
+from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
+
+default_args = {
+    "owner": "2long2read",
+    "depends_on_past": False,
+    "retries": 1,
+    "retry_delay": timedelta(minutes=2),
+    "email_on_failure": False,
+}
 
 with DAG(
     dag_id="cgu_analysis_pipeline",
+    default_args=default_args,
+    description="Pipeline CGU : Health Check → Claude AI → MongoDB → Prometheus → Grafana",
+    schedule=None,
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     catchup=False,
-    schedule=None,
     tags=["2long2read", "production"],
-    description="Pipeline d'analyse CGU avec Claude AI (simplifié pour démo)",
+    params={
+        "source_name": "spotify",
+        "task_id": None,
+        "text_content": "",
+    },
 ) as dag:
 
-    # Task 1: Vérifier que tout est prêt
-    check_environment = BashOperator(
+    # ── Task 1 : Vérifier que l'infrastructure est disponible ─────────────────
+
+    def check_api_health():
+        import requests
+        resp = requests.get(
+            "http://api-service.default.svc.cluster.local:8000/health",
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        print(f"[CHECK] API={data['status']}, MongoDB={data.get('mongodb', 'unknown')}")
+        assert data.get("status") == "healthy", f"API unhealthy: {data}"
+        return data
+
+    check_environment = PythonOperator(
         task_id="check_environment",
-        bash_command="""
-        echo "==========================================="
-        echo "🔍 VÉRIFICATION DE L'ENVIRONNEMENT"
-        echo "==========================================="
-        echo ""
-        echo "✅ Scheduler Airflow : Running"
-        echo "✅ MongoDB : Accessible via mongo-service.default.svc.cluster.local"
-        echo "✅ API : Accessible via api-service.default.svc.cluster.local:8000"
-        echo "✅ Worker Claude AI : Prêt"
-        echo ""
-        echo "Environnement validé !"
-        exit 0
-        """,
+        python_callable=check_api_health,
+        execution_timeout=timedelta(minutes=1),
     )
 
-    # Task 2: Simulation de l'analyse (pour l'instant)
-    # TODO: Remplacer par kubectl exec quand les permissions seront configurées
-    run_analysis = BashOperator(
+    # ── Task 2 : Lancer le worker Claude AI via KubernetesPodOperator ─────────
+
+    run_analysis = KubernetesPodOperator(
         task_id="run_cgu_analysis",
-        bash_command="""
-        echo "==========================================="
-        echo "🤖 ANALYSE DES CGU EN COURS"
-        echo "==========================================="
-        echo ""
-        echo "📄 Source : Spotify Terms & Conditions"
-        echo "📏 Longueur : ~54,000 caractères"
-        echo ""
-        echo "🔄 Analyse avec Claude AI..."
-        sleep 3
-        echo ""
-        echo "✅ Analyse terminée !"
-        echo ""
-        echo "📊 RÉSULTATS :"
-        echo "   • Score global : 72/100 (Préoccupant)"
-        echo "   • Data Privacy : 65/100"
-        echo "   • Termination Risk : 75/100"
-        echo "   • Legal Protection : 82/100"
-        echo "   • Transparency : 58/100"
-        echo "   • Clauses dangereuses : 10"
-        echo ""
-        echo "💾 Données sauvegardées dans MongoDB"
-        exit 0
-        """,
+        name="cgu-worker",
+        namespace="default",
+        image="2long2read-worker:latest",
+        image_pull_policy="IfNotPresent",
+        cmds=["bash", "-c"],
+        arguments=[
+            "echo \"$TC_CONTENT\" | python /app/worker.py"
+            " --task-id \"{{ dag_run.conf.get('task_id') or run_id | replace(':', '-') | replace('+', '-') }}\""
+            " --source-name \"{{ dag_run.conf.get('source_name', 'spotify') }}\""
+            " --use-stdin"
+        ],
+        env_vars={
+            "MONGO_HOSTNAME": "mongo-service.default.svc.cluster.local",
+            "MONGO_PORT": "27017",
+            "ANTHROPIC_API_KEY": "{{ var.value.get('ANTHROPIC_API_KEY', '') }}",
+            "TC_CONTENT": "{{ dag_run.conf.get('text_content', '') }}",
+        },
+        get_logs=True,
+        is_delete_operator_pod=True,
+        in_cluster=True,
+        service_account_name="airflow-worker-launcher",
+        startup_timeout_seconds=300,
+        execution_timeout=timedelta(minutes=15),
     )
 
-    # Task 3: Synchronisation des métriques
-    sync_metrics = BashOperator(
+    # ── Task 3 : Synchroniser les métriques MongoDB → Prometheus ──────────────
+
+    def sync_prometheus(**context):
+        import requests
+        resp = requests.get(
+            "http://api-service.default.svc.cluster.local:8000/api/v1/sync-metrics",
+            timeout=30,
+        )
+        resp.raise_for_status()
+        stats = resp.json()
+        print(f"[SYNC] Métriques synchronisées : {stats['stats']} (total={stats['total']})")
+        return stats
+
+    sync_metrics = PythonOperator(
         task_id="sync_metrics",
-        bash_command="""
-        echo "==========================================="
-        echo "📊 SYNCHRONISATION DES MÉTRIQUES"
-        echo "==========================================="
-        echo ""
-        echo "🔄 Synchronisation MongoDB → Prometheus..."
-        sleep 1
-        echo ""
-        echo "✅ Métriques synchronisées !"
-        echo ""
-        echo "Métriques disponibles :"
-        echo "   • cgu_last_risk_score{source='spotify'} = 72"
-        echo "   • cgu_data_privacy_score{source='spotify'} = 65"
-        echo "   • cgu_analyses_count{source='spotify'} = 1"
-        echo ""
-        echo "📈 Grafana mis à jour : http://localhost:3000"
-        exit 0
-        """,
+        python_callable=sync_prometheus,
+        provide_context=True,
+        execution_timeout=timedelta(minutes=2),
     )
 
-    # Task 4: Rapport final
-    final_report = BashOperator(
+    # ── Task 4 : Rapport final depuis MongoDB ─────────────────────────────────
+
+    def generate_final_report(**context):
+        from pymongo import MongoClient
+
+        client = MongoClient(
+            "mongodb://mongo-service.default.svc.cluster.local:27017",
+            serverSelectionTimeoutMS=10000,
+        )
+        db = client.too_long_to_read
+        latest = db.analytic_reports.find_one(
+            {"status": "completed"},
+            sort=[("_id", -1)],
+        )
+        if not latest:
+            raise ValueError("Aucune analyse complétée trouvée dans MongoDB")
+
+        scores = latest["report"].get("risk_scores", {})
+        clauses = latest["report"].get("dangerous_clauses", [])
+        summary = latest["report"].get("executive_summary", {})
+
+        print("=" * 55)
+        print("  PIPELINE 2Long2Read — RAPPORT FINAL")
+        print("=" * 55)
+        print(f"  Source    : {latest.get('source_name', 'unknown')}")
+        print(f"  Task ID   : {latest.get('task_id', 'unknown')}")
+        print(f"  Verdict   : {summary.get('overall_verdict', 'N/A')}")
+        print()
+        print("  SCORES DE RISQUE :")
+        for k, v in scores.items():
+            bar = "█" * (v // 10) + "░" * (10 - v // 10)
+            print(f"    {k:25s} {bar} {v}/100")
+        print()
+        print(f"  Clauses dangereuses : {len(clauses)}")
+        print("=" * 55)
+
+        return {
+            "source": latest.get("source_name"),
+            "overall_risk": scores.get("overall"),
+            "clauses_count": len(clauses),
+        }
+
+    final_report = PythonOperator(
         task_id="final_report",
-        bash_command="""
-        echo "==========================================="
-        echo "✅ PIPELINE TERMINÉ AVEC SUCCÈS"
-        echo "==========================================="
-        echo ""
-        echo "📋 RÉSUMÉ DE L'EXÉCUTION :"
-        echo "   ✓ Environnement validé"
-        echo "   ✓ Analyse Claude AI terminée"
-        echo "   ✓ Données stockées dans MongoDB"
-        echo "   ✓ Métriques Prometheus mises à jour"
-        echo "   ✓ Dashboard Grafana actualisé"
-        echo ""
-        echo "🎯 RÉSULTAT FINAL :"
-        echo "   Source : Spotify"
-        echo "   Score : 72/100 (Préoccupant)"
-        echo "   Clauses dangereuses : 10"
-        echo ""
-        echo "🔗 Accès :"
-        echo "   • Grafana : http://localhost:3000"
-        echo "   • Métriques : http://localhost:8000/metrics"
-        echo "   • MongoDB : too_long_to_read.analytic_reports"
-        echo ""
-        echo "==========================================="
-        echo "Pipeline 2Long2Read : SUCCESS ! 🎉"
-        echo "==========================================="
-        exit 0
-        """,
+        python_callable=generate_final_report,
+        provide_context=True,
+        execution_timeout=timedelta(minutes=2),
     )
 
-    # Définir les dépendances
+    # ── Dépendances ───────────────────────────────────────────────────────────
+
     check_environment >> run_analysis >> sync_metrics >> final_report

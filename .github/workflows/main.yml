@@ -1,81 +1,71 @@
-name: Build and Deploy API and Worker
+name: Build and Deploy
 
-# Déclencheur: ce workflow se lance à chaque push sur la branche 'main'
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
-  build-and-push-images:
+  build-and-push:
     name: Build and Push Docker Images
-    runs-on: ubuntu-latest # Le robot utilisera une machine virtuelle Ubuntu
+    runs-on: ubuntu-latest
 
     steps:
-    # Étape 1: Récupérer le code de votre dépôt
-    - name: Check out the repo
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    # Étape 2: Se connecter à un registre d'images (Docker Hub)
-    - name: Log in to Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    # Étape 3: Extraire les métadonnées pour l'API
-    - name: Extract metadata (tags, labels) for API
-      id: meta-api
-      uses: docker/metadata-action@v5
-      with:
-        images: ${{ secrets.DOCKERHUB_USERNAME }}/2long2read-api
-        tags: |
-          type=ref,event=branch
-          type=sha,prefix={{branch}}-
-          type=raw,value=latest,enable={{is_default_branch}}
+      - name: Extract metadata for API image
+        id: meta-api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/2long2read-api
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
 
-    # Étape 4: Construire et pousser l'image de l'API
-    - name: Build and push API image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: ./Dockerfile
-        push: true
-        tags: ${{ steps.meta-api.outputs.tags }}
-        labels: ${{ steps.meta-api.outputs.labels }}
+      - name: Build and push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta-api.outputs.tags }}
+          labels: ${{ steps.meta-api.outputs.labels }}
 
-    # Étape 5: Extraire les métadonnées pour le Worker
-    - name: Extract metadata (tags, labels) for Worker
-      id: meta-worker
-      uses: docker/metadata-action@v5
-      with:
-        images: ${{ secrets.DOCKERHUB_USERNAME }}/2long2read-worker
-        tags: |
-          type=ref,event=branch
-          type=sha,prefix={{branch}}-
-          type=raw,value=latest,enable={{is_default_branch}}
+      - name: Extract metadata for Worker image
+        id: meta-worker
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/2long2read-worker
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
 
-    # Étape 6: Construire et pousser l'image du Worker
-    - name: Build and push Worker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: ./Dockerfile.worker
-        push: true
-        tags: ${{ steps.meta-worker.outputs.tags }}
-        labels: ${{ steps.meta-worker.outputs.labels }}
+      - name: Build and push Worker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile.worker
+          push: true
+          tags: ${{ steps.meta-worker.outputs.tags }}
+          labels: ${{ steps.meta-worker.outputs.labels }}
 
-    # Étape 7: Notification de succès
-    - name: Build Summary
-      if: success()
-      run: |
-        echo "✅ Images Docker construites et publiées avec succès!"
-        echo ""
-        echo "Images créées:"
-        echo "  - API: ${{ secrets.DOCKERHUB_USERNAME }}/2long2read-api:latest"
-        echo "  - Worker: ${{ secrets.DOCKERHUB_USERNAME }}/2long2read-worker:latest"
-        echo ""
-        echo "Pour déployer sur Kubernetes:"
-        echo "  kubectl set image deployment/api-deployment api=${{ secrets.DOCKERHUB_USERNAME }}/2long2read-api:latest"
-        echo "  kubectl set image deployment/worker-deployment worker=${{ secrets.DOCKERHUB_USERNAME }}/2long2read-worker:latest"
+      - name: Summary
+        if: success()
+        run: |
+          echo "Images publiées :"
+          echo "  API    : ${{ secrets.DOCKERHUB_USERNAME }}/2long2read-api:latest"
+          echo "  Worker : ${{ secrets.DOCKERHUB_USERNAME }}/2long2read-worker:latest"
+          echo ""
+          echo "Pour déployer :"
+          echo "  kubectl set image deployment/api-deployment api=${{ secrets.DOCKERHUB_USERNAME }}/2long2read-api:latest"
+          echo "  kubectl set image deployment/worker-deployment worker=${{ secrets.DOCKERHUB_USERNAME }}/2long2read-worker:latest"

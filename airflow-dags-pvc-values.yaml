@@ -1,9 +1,0 @@
-# Configuration Airflow pour utiliser le PVC au lieu du ConfigMap
-# Ce fichier corrige le bug des symlinks en montant directement le répertoire local
-
-dags:
-  persistence:
-    enabled: true
-    existingClaim: airflow-dags-pvc
-    storageClassName: hostpath
-    accessMode: ReadWriteMany
