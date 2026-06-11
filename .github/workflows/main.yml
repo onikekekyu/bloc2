@@ -1,4 +1,4 @@
-name: Build and Deploy
+name: CI — Build and Validate
 
 on:
   push:
@@ -7,9 +7,56 @@ on:
     branches: ["main"]
 
 jobs:
-  build-and-push:
-    name: Build and Push Docker Images
+  build:
+    name: Build Docker Images
     runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate Python syntax
+        run: |
+          python -m py_compile main.py worker.py ai_analyzer.py
+          echo "Python syntax OK"
+
+      - name: Check DAG syntax
+        run: |
+          python -m py_compile dags/cgu_analysis_dag.py
+          echo "DAG syntax OK"
+
+      - name: Build API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          push: false
+          tags: 2long2read-api:latest
+
+      - name: Build Worker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile.worker
+          push: false
+          tags: 2long2read-worker:latest
+
+      - name: Summary
+        run: |
+          echo "Build OK:"
+          echo "  2long2read-api:latest"
+          echo "  2long2read-worker:latest"
+
+  push:
+    name: Push to Docker Hub
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main' && secrets.DOCKERHUB_USERNAME != ''
 
     steps:
       - name: Checkout
@@ -21,34 +68,13 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract metadata for API image
-        id: meta-api
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/2long2read-api
-          tags: |
-            type=ref,event=branch
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
-
       - name: Build and push API image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./docker/Dockerfile
           push: true
-          tags: ${{ steps.meta-api.outputs.tags }}
-          labels: ${{ steps.meta-api.outputs.labels }}
-
-      - name: Extract metadata for Worker image
-        id: meta-worker
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/2long2read-worker
-          tags: |
-            type=ref,event=branch
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/2long2read-api:latest
 
       - name: Build and push Worker image
         uses: docker/build-push-action@v5
@@ -56,16 +82,4 @@ jobs:
           context: .
           file: ./docker/Dockerfile.worker
           push: true
-          tags: ${{ steps.meta-worker.outputs.tags }}
-          labels: ${{ steps.meta-worker.outputs.labels }}
-
-      - name: Summary
-        if: success()
-        run: |
-          echo "Images publiées :"
-          echo "  API    : ${{ secrets.DOCKERHUB_USERNAME }}/2long2read-api:latest"
-          echo "  Worker : ${{ secrets.DOCKERHUB_USERNAME }}/2long2read-worker:latest"
-          echo ""
-          echo "Pour déployer :"
-          echo "  kubectl set image deployment/api-deployment api=${{ secrets.DOCKERHUB_USERNAME }}/2long2read-api:latest"
-          echo "  kubectl set image deployment/worker-deployment worker=${{ secrets.DOCKERHUB_USERNAME }}/2long2read-worker:latest"
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/2long2read-worker:latest
