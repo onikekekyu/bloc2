@@ -39,7 +39,7 @@
 | Monitoring | Prometheus + Grafana (kube-prometheus-stack) | Observabilité |
 | Conteneurs | Docker + Kubernetes | Déploiement |
 | IaC | Terraform + Kubernetes YAML + Helm | Infrastructure as Code |
-| CI/CD | GitHub Actions | Build + Push Docker Hub |
+| CI/CD | GitHub Actions | Build + validation syntaxe |
 
 ---
 
@@ -340,6 +340,22 @@ kubectl exec deployment/mongo-deployment -- \
 # Redémarrer un composant
 kubectl rollout restart deployment/api-deployment
 ```
+
+---
+
+## CI/CD
+
+Le pipeline GitHub Actions se déclenche à chaque push sur `main` et effectue :
+
+1. **Validation syntaxe Python** — `main.py`, `worker.py`, `ai_analyzer.py`, `dags/cgu_analysis_dag.py`
+2. **Build image API** — `docker/Dockerfile`
+3. **Build image Worker** — `docker/Dockerfile.worker`
+
+```
+Push → GitHub Actions → py_compile ✓ → docker build API ✓ → docker build Worker ✓
+```
+
+Les images ne sont pas poussées sur un registry (Docker Hub optionnel via secrets `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`).
 
 ---
 
