@@ -82,6 +82,7 @@
 │   ├── spotify_tc.txt
 │   └── anthropic_tc.txt
 │
+├── run_worker.sh                  # Raccourci : lance une analyse locale
 ├── main.py                        # API FastAPI
 ├── worker.py                      # Worker CLI (analysis runner)
 ├── ai_analyzer.py                 # Intégration Claude AI
@@ -190,7 +191,10 @@ pip install -r requirements.txt
 # Port-forward MongoDB
 kubectl port-forward svc/mongo-service 27017:27017 &
 
-# Lancer l'analyse
+# Lancer l'analyse (raccourci depuis la racine)
+./run_worker.sh
+
+# Ou avec des paramètres personnalisés
 ./scripts/run_worker.sh raw_data/spotify_tc.txt spotify
 ```
 
